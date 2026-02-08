@@ -77,7 +77,7 @@ class ElasticsearchService:
             return 0
         
         if not documents:
-            print("⚠️  No documents to index")
+            print("  No documents to index")
             return 0
         
         try:

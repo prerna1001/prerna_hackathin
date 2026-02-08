@@ -4,7 +4,7 @@ One-time script to index all press releases from PostgreSQL into Elasticsearch.
 Run: python3 es_indexer.py
 """
 
-from database import DatabaseManager
+from database import DatabaseManager, PressReleaseDB
 from elasticsearch_service import ElasticsearchService
 
 def index_press_releases():
@@ -24,7 +24,7 @@ def index_press_releases():
     # Fetch all press releases from DB
     try:
         session = db_manager.get_session()
-        press_releases = session.query(db_manager.PressReleaseDB).all()
+        press_releases = session.query(PressReleaseDB).all()
         session.close()
         
         if not press_releases:
