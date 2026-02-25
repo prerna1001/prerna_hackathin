@@ -17,8 +17,13 @@ def index_press_releases():
     if not es_service.client:
         print("Cannot connect to Elasticsearch. Make sure it's running.")
         return
-    
-    # Ensure index exists
+
+    # Recreate index to avoid stale documents from previous runs
+    if es_service.client.indices.exists(index=es_service.index_name):
+        es_service.client.indices.delete(index=es_service.index_name)
+        print(f"Deleted existing index '{es_service.index_name}'")
+
+    # Ensure fresh index exists
     es_service.ensure_index()
     
     # Fetch all press releases from DB
@@ -35,11 +40,9 @@ def index_press_releases():
         documents = []
         for pr in press_releases:
             documents.append({
-                'id': pr.id,
                 'company': pr.company,
                 'published_date': pr.published_date.isoformat() if pr.published_date else None,
                 'title': pr.title,
-                'category': pr.category,
                 'url': pr.url,
                 'full_text': pr.full_text
             })

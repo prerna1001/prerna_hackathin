@@ -2,7 +2,7 @@ import React from 'react';
 
 function Pagination({ currentPage, totalPages, onPageChange }) {
   const pages = [];
-  const maxPagesToShow = 5;
+  const maxPagesToShow = totalPages;
 
   let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
   let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
@@ -16,8 +16,8 @@ function Pagination({ currentPage, totalPages, onPageChange }) {
   }
 
   return (
-    <nav className="d-flex justify-content-center mt-5" aria-label="Page navigation">
-      <ul className="pagination">
+    <nav className="d-flex justify-content-center mt-5 pagination-wrap" aria-label="Page navigation">
+      <ul className="pagination align-items-center">
         <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
           <button
             onClick={() => onPageChange(currentPage - 1)}
@@ -33,7 +33,7 @@ function Pagination({ currentPage, totalPages, onPageChange }) {
             <li className="page-item">
               <button onClick={() => onPageChange(1)} className="page-link">1</button>
             </li>
-            {startPage > 2 && <li className="page-item disabled"><span className="page-link">...</span></li>}
+            {startPage > 2 && <li className="page-item disabled"><span className="page-link">…</span></li>}
           </>
         )}
 
@@ -47,7 +47,7 @@ function Pagination({ currentPage, totalPages, onPageChange }) {
 
         {endPage < totalPages && (
           <>
-            {endPage < totalPages - 1 && <li className="page-item disabled"><span className="page-link">...</span></li>}
+            {endPage < totalPages - 1 && <li className="page-item disabled"><span className="page-link">…</span></li>}
             <li className="page-item">
               <button onClick={() => onPageChange(totalPages)} className="page-link">{totalPages}</button>
             </li>

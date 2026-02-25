@@ -1,8 +1,6 @@
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
-from database import DatabaseManager, PressReleaseDB
-from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from fastapi.middleware.cors import CORSMiddleware
 from elasticsearch_service import ElasticsearchService
 
@@ -19,26 +17,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-db_manager = DatabaseManager()
-
-# Helper function to convert DB object to dict (only title, date, url)
 def press_release_to_dict(pr):
     return {
-        'id': pr.id,
-        'title': pr.title,
-        'company': pr.company,
-        'published_date': pr.published_date.isoformat() if pr.published_date else None,
-        'url': pr.url
+        'title': pr.get('title'),
+        'company': pr.get('company'),
+        'published_date': pr.get('published_date'),
+        'url': pr.get('url'),
+        'matches': pr.get('matches', []),
+    }
+
+
+def press_release_detail_to_dict(pr):
+    return {
+        'title': pr.get('title'),
+        'company': pr.get('company'),
+        'published_date': pr.get('published_date'),
+        'url': pr.get('url'),
+        'full_text': pr.get('full_text'),
     }
 
 # API 1: Get ALL Press Releases
 @app.get('/api/press-releases')
 def get_all_press_releases():
     try:
-        session = db_manager.get_session()
-        results = session.query(PressReleaseDB).all()
-        session.close()
-        
+        results = es_service.get_all()
         data = [press_release_to_dict(r) for r in results]
         
         return {
@@ -53,38 +55,136 @@ def get_all_press_releases():
             content={'status': 'error', 'message': str(e)}
         )
 
+
+@app.get('/api/filter-config')
+def get_filter_config():
+    try:
+        config = es_service.get_filter_config()
+        return {
+            'status': 'success',
+            'data': config,
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={'status': 'error', 'message': str(e)}
+        )
+
+
+@app.get('/api/initial-data')
+def get_initial_data():
+    try:
+        results = es_service.get_all()
+        releases = [press_release_to_dict(r) for r in results]
+        config = es_service.get_filter_config()
+
+        return {
+            'status': 'success',
+            'data': {
+                'releases': releases,
+                'filter_config': config,
+            }
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={'status': 'error', 'message': str(e)}
+        )
+
+
+@app.get('/api/query-press-releases')
+def query_press_releases(
+    query: Optional[str] = Query(None),
+    company: Optional[List[str]] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+):
+    try:
+        config = es_service.get_filter_config()
+        limit = config.get('limit', 1000)
+        results = es_service.query_documents(
+            query_text=query,
+            companies=company,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+
+        data = [press_release_to_dict(r) for r in results]
+        return {
+            'status': 'success',
+            'data': data,
+            'count': len(data)
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={'status': 'error', 'message': str(e)}
+        )
+
+
+@app.get('/api/press-releases/detail')
+def get_press_release_by_url(url: str = Query(..., description="Press release URL")):
+    try:
+        result = es_service.get_by_url(url)
+
+        if not result:
+            return JSONResponse(
+                status_code=404,
+                content={'status': 'error', 'message': 'Press release not found'}
+            )
+
+        return {
+            'status': 'success',
+            'data': press_release_detail_to_dict(result)
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={'status': 'error', 'message': str(e)}
+        )
+
+
+@app.get('/press-releases/all')
+def get_all_press_releases_paginated(
+    page: int = Query(1, ge=1),
+    size: int = Query(10, ge=1)
+):
+    try:
+        result = es_service.get_all_paginated(page=page, size=size)
+        total = result["total"]
+
+        return {
+            "status": "success",
+            "page": page,
+            "size": size,
+            "total": total,
+            "total_pages": (total + size - 1) // size,
+            "data": result["results"]
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": str(e)}
+        )
+
 # API 2: Filter Press Releases
 @app.get('/api/filter-press-releases')
 def filter_press_releases(
-    company: Optional[str] = Query(None),
+    company: Optional[List[str]] = Query(None),
     title: Optional[str] = Query(None),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None)
 ):
     try:
-        session = db_manager.get_session()
-        query = session.query(PressReleaseDB)
-        
-        # Filter by company
-        if company:
-            query = query.filter(PressReleaseDB.company.ilike(f'%{company}%'))
-        
-        # Filter by title
-        if title:
-            query = query.filter(PressReleaseDB.title.ilike(f'%{title}%'))
-        
-        # Filter by start_date
-        if start_date:
-            start_date_obj = datetime.strptime(start_date, '%Y-%m-%d').date()
-            query = query.filter(PressReleaseDB.published_date >= start_date_obj)
-        
-        # Filter by end_date
-        if end_date:
-            end_date_obj = datetime.strptime(end_date, '%Y-%m-%d').date()
-            query = query.filter(PressReleaseDB.published_date <= end_date_obj)
-        
-        results = query.all()
-        session.close()
+        query_text = title if title else None
+        results = es_service.query_documents(
+            query_text=query_text,
+            companies=company,
+            start_date=start_date,
+            end_date=end_date,
+            limit=1000,
+        )
         
         data = [press_release_to_dict(r) for r in results]
         
@@ -111,7 +211,7 @@ def health_check():
 def search_press_releases(
     q: Optional[str] = Query(None, description="Search query"),
     company: Optional[str] = Query(None, description="Filter by company"),
-    limit: int = Query(20, ge=1, le=100, description="Max results")
+    limit: int = Query(20, ge=1, description="Max results")
 ):
     try:
         if not q:
@@ -120,7 +220,12 @@ def search_press_releases(
                 content={'status': 'error', 'message': 'Query parameter "q" is required'}
             )
         
-        results = es_service.search(query_text=q, company=company, limit=limit)
+        companies = [company] if company else None
+        results = es_service.query_documents(
+            query_text=q,
+            companies=companies,
+            limit=limit,
+        )
         
         return {
             'status': 'success',
