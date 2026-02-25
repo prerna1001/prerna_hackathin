@@ -23,8 +23,9 @@ function Pagination({ currentPage, totalPages, onPageChange }) {
             onClick={() => onPageChange(currentPage - 1)}
             disabled={currentPage === 1}
             className="page-link"
+            aria-label="Previous page"
           >
-            <i className="bi bi-chevron-left me-1"></i>Previous
+            <i className="bi bi-chevron-left"></i>
           </button>
         </li>
 
@@ -59,8 +60,9 @@ function Pagination({ currentPage, totalPages, onPageChange }) {
             onClick={() => onPageChange(currentPage + 1)}
             disabled={currentPage === totalPages}
             className="page-link"
+            aria-label="Next page"
           >
-            Next <i className="bi bi-chevron-right ms-1"></i>
+            <i className="bi bi-chevron-right"></i>
           </button>
         </li>
       </ul>

@@ -23,6 +23,7 @@ def press_release_to_dict(pr):
         'company': pr.get('company'),
         'published_date': pr.get('published_date'),
         'url': pr.get('url'),
+        'summary': pr.get('summary', ''),
         'matches': pr.get('matches', []),
     }
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { hasAnyQueryMatch, highlightTextNodes } from '../utils/highlight';
 
 function PressReleaseModal({ show, release, matchTarget, searchQuery, loading, onClose }) {
   const closeButtonRef = useRef(null);
@@ -138,53 +139,40 @@ function PressReleaseModal({ show, release, matchTarget, searchQuery, loading, o
   }, [release?.published_date]);
 
   const structuredBlocks = buildStructuredBlocks(release?.full_text || '');
+  const matchedSnippets = useMemo(
+    () => {
+      const fromMatches = (Array.isArray(release?.matches) ? release.matches : [])
+        .map((item) => String(item?.plain_text || '').trim())
+        .filter(Boolean);
 
-  const highlightTerms = useMemo(() => {
-    const query = (searchQuery || '').trim();
-    if (!query) return [];
+      const fromFields = [release?.summary, release?.description]
+        .map((item) => String(item || '').trim())
+        .filter(Boolean);
 
-    const words = query
-      .split(/\s+/)
-      .map((item) => item.trim())
-      .filter((item) => item.length > 1);
+      const merged = [...fromMatches, ...fromFields];
+      const deduped = [];
+      const seen = new Set();
 
-    const combined = [query, ...words];
-    const deduped = [];
-    const seen = new Set();
-
-    for (const term of combined) {
-      const key = term.toLowerCase();
-      if (!seen.has(key)) {
-        seen.add(key);
-        deduped.push(term);
+      for (const snippet of merged) {
+        const key = snippet.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          deduped.push(snippet);
+        }
       }
-    }
 
-    return deduped.sort((a, b) => b.length - a.length);
-  }, [searchQuery]);
+      return deduped.slice(0, 3);
+    },
+    [release?.matches, release?.summary, release?.description]
+  );
+  const hasSearchQuery = !!(searchQuery || '').trim();
+  const fullTextHasQuery = hasAnyQueryMatch(release?.full_text || '', searchQuery);
+  const showMatchedSnippetsOnly = hasSearchQuery && matchedSnippets.length > 0 && !fullTextHasQuery;
 
-  const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-  const highlightTextPart = (text, keyPrefix) => {
-    if (!highlightTerms.length) return text;
-
-    const pattern = highlightTerms.map((term) => escapeRegExp(term)).join('|');
-    if (!pattern) return text;
-
-    const regex = new RegExp(`(${pattern})`, 'gi');
-    const parts = text.split(regex);
-
-    return parts.map((part, idx) => {
-      const isMatch = highlightTerms.some((term) => part.toLowerCase() === term.toLowerCase());
-      if (isMatch) {
-        return <mark key={`${keyPrefix}-m-${idx}`}>{part}</mark>;
-      }
-      return <React.Fragment key={`${keyPrefix}-t-${idx}`}>{part}</React.Fragment>;
-    });
-  };
+  const highlightTextPart = (text, keyPrefix) => highlightTextNodes(text, searchQuery, keyPrefix);
 
   const renderSearchText = (text) => {
-    if (!highlightTerms.length) {
+    if (!(searchQuery || '').trim()) {
       return renderTextWithLinks(text);
     }
 
@@ -204,47 +192,52 @@ function PressReleaseModal({ show, release, matchTarget, searchQuery, loading, o
   };
 
   useEffect(() => {
-    if (!show || loading || !matchTarget?.plain_text || !modalBodyRef.current) return;
+    if (!show || loading || !modalBodyRef.current) return;
 
-    const targetText = normalizeForMatch(matchTarget.plain_text);
-    if (!targetText) return;
+    const frame = window.requestAnimationFrame(() => {
+      const targetText = normalizeForMatch(matchTarget?.plain_text || '');
+      const matchField = normalizeForMatch(matchTarget?.field || matchTarget?.field_label || '');
 
-    const matchField = normalizeForMatch(matchTarget.field || matchTarget.field_label || '');
-    if (matchField.includes('title')) {
-      const titleNode = modalContentRef.current?.querySelector('[data-match-title]');
-      if (titleNode) {
-        titleNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (targetText && matchField.includes('title')) {
+        const titleNode = modalContentRef.current?.querySelector('[data-match-title]');
+        if (titleNode) {
+          titleNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+        }
       }
-      return;
-    }
 
-    const targetWords = targetText
-      .split(' ')
-      .filter(Boolean)
-      .slice(0, 10)
-      .join(' ');
+      if (targetText) {
+        const targetWords = targetText
+          .split(' ')
+          .filter(Boolean)
+          .slice(0, 10)
+          .join(' ');
 
-    const paragraphs = modalBodyRef.current.querySelectorAll('[data-paragraph-index]');
-    let targetNode = null;
+        const paragraphs = modalBodyRef.current.querySelectorAll('[data-paragraph-index]');
+        let targetNode = null;
 
-    paragraphs.forEach((node) => {
-      if (targetNode) return;
-      const text = normalizeForMatch(node.textContent || '');
-      if (text.includes(targetWords || targetText) || targetText.includes(text.slice(0, 80))) {
-        targetNode = node;
+        paragraphs.forEach((node) => {
+          if (targetNode) return;
+          const text = normalizeForMatch(node.textContent || '');
+          if (text.includes(targetWords || targetText) || targetText.includes(text.slice(0, 80))) {
+            targetNode = node;
+          }
+        });
+
+        if (targetNode) {
+          targetNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+        }
+      }
+
+      const firstMark = modalBodyRef.current.querySelector('mark');
+      if (firstMark) {
+        firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     });
 
-    if (targetNode) {
-      targetNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return;
-    }
-
-    const firstMark = modalBodyRef.current.querySelector('mark');
-    if (firstMark) {
-      firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }, [show, loading, matchTarget, release?.full_text]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [show, loading, matchTarget, release?.full_text, searchQuery]);
 
   return (
     <AnimatePresence>
@@ -280,10 +273,10 @@ function PressReleaseModal({ show, release, matchTarget, searchQuery, loading, o
                     </h4>
                     <div className="d-flex flex-wrap gap-2 text-muted small">
                       {release?.company && (
-                        <span className="badge text-bg-light border">Company: {release.company}</span>
+                        <span className="badge release-meta-badge release-meta-company">{release.company}</span>
                       )}
                       {formattedPublishedDate && (
-                        <span className="badge text-bg-light border">Published: {formattedPublishedDate}</span>
+                        <span className="badge release-meta-badge">{formattedPublishedDate}</span>
                       )}
                     </div>
                   </div>
@@ -303,6 +296,14 @@ function PressReleaseModal({ show, release, matchTarget, searchQuery, loading, o
                         <span className="visually-hidden">Loading...</span>
                       </div>
                     </div>
+                  ) : showMatchedSnippetsOnly ? (
+                    <div className="press-modal-content-text">
+                      {matchedSnippets.map((snippet, index) => (
+                        <p key={`matched-snippet-${index}`} data-paragraph-index={index} className="mb-3 lh-lg">
+                          {renderSearchText(snippet)}
+                        </p>
+                      ))}
+                    </div>
                   ) : structuredBlocks.length > 0 ? (
                     <div className="press-modal-content-text">
                       {structuredBlocks.map((block, index) =>
@@ -321,6 +322,14 @@ function PressReleaseModal({ show, release, matchTarget, searchQuery, loading, o
                         )
                       )}
                     </div>
+                  ) : matchedSnippets.length > 0 ? (
+                    <div className="press-modal-content-text">
+                      {matchedSnippets.map((snippet, index) => (
+                        <p key={`matched-snippet-${index}`} data-paragraph-index={index} className="mb-3 lh-lg">
+                          {hasAnyQueryMatch(snippet, searchQuery) ? renderSearchText(snippet) : snippet}
+                        </p>
+                      ))}
+                    </div>
                   ) : (
                     <p className="mb-0">No full text available for this press release.</p>
                   )}
@@ -330,14 +339,14 @@ function PressReleaseModal({ show, release, matchTarget, searchQuery, loading, o
                   {release?.url && (
                     <a
                       href={release.url}
-                      className="btn btn-outline-primary"
+                      className="btn modal-source-btn"
                       target="_blank"
                       rel="noopener noreferrer"
                     >
-                      Read on source site
+                      Read on source site <i className="bi bi-arrow-right ms-1"></i>
                     </a>
                   )}
-                  <button type="button" className="btn btn-secondary" onClick={onClose}>
+                  <button type="button" className="btn modal-close-btn" onClick={onClose}>
                     Close
                   </button>
                 </div>

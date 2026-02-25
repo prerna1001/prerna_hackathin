@@ -224,16 +224,104 @@ class ElasticsearchService:
             print("Elasticsearch client not initialized")
             return []
 
+        def query_terms(text: Optional[str]) -> List[str]:
+            if not text:
+                return []
+            base_terms = [part.lower() for part in str(text).split() if len(part.strip()) > 1]
+            expanded = []
+            seen = set()
+            for term in base_terms:
+                variants = [term]
+                if len(term) > 2:
+                    if term.endswith("s"):
+                        variants.append(term[:-1])
+                    else:
+                        variants.append(f"{term}s")
+                for variant in variants:
+                    normalized = variant.strip()
+                    if len(normalized) <= 1 or normalized in seen:
+                        continue
+                    seen.add(normalized)
+                    expanded.append(normalized)
+            return expanded
+
+        def contains_query(text: Optional[str], terms: List[str]) -> bool:
+            normalized = " ".join(str(text or "").lower().split())
+            if not normalized or not terms:
+                return False
+            return any(term in normalized for term in terms)
+
+        def extract_context_snippet(text: Optional[str], terms: List[str], max_len: int = 240) -> str:
+            source = " ".join(str(text or "").split())
+            if not source:
+                return ""
+            if not terms:
+                return source[:max_len]
+
+            lowered = source.lower()
+            first_index = -1
+            for term in terms:
+                idx = lowered.find(term)
+                if idx != -1 and (first_index == -1 or idx < first_index):
+                    first_index = idx
+
+            if first_index == -1:
+                return source[:max_len]
+
+            half = max_len // 2
+            start = max(0, first_index - half)
+            end = min(len(source), start + max_len)
+            if end - start < max_len:
+                start = max(0, end - max_len)
+
+            prefix = "..." if start > 0 else ""
+            suffix = "..." if end < len(source) else ""
+            return f"{prefix}{source[start:end].strip()}{suffix}"
+
         try:
             must_clauses = []
             filter_clauses = []
+            terms = query_terms(query_text)
 
             if query_text:
-                must_clauses.append(
+                should_clauses = [
                     {
                         "multi_match": {
                             "query": query_text,
                             "fields": ["title^2", "full_text"],
+                        }
+                    }
+                ]
+
+                for term in terms:
+                    if len(term) < 3:
+                        continue
+                    should_clauses.append(
+                        {
+                            "wildcard": {
+                                "full_text": {
+                                    "value": f"*{term}*",
+                                    "case_insensitive": True,
+                                }
+                            }
+                        }
+                    )
+                    should_clauses.append(
+                        {
+                            "wildcard": {
+                                "title": {
+                                    "value": f"*{term}*",
+                                    "case_insensitive": True,
+                                }
+                            }
+                        }
+                    )
+
+                must_clauses.append(
+                    {
+                        "bool": {
+                            "should": should_clauses,
+                            "minimum_should_match": 1,
                         }
                     }
                 )
@@ -327,6 +415,11 @@ class ElasticsearchService:
                 seen_norm = set()
                 for match in ranked_matches:
                     norm = match.get("normalized")
+                    plain_text = match.get("plain_text", "")
+
+                    if query_text and terms and not contains_query(plain_text, terms):
+                        continue
+
                     if norm in seen_norm:
                         continue
                     frequency = snippet_frequency.get(norm, 0)
@@ -338,22 +431,43 @@ class ElasticsearchService:
                             "field": match.get("field"),
                             "field_label": match.get("field_label"),
                             "snippet": match.get("snippet"),
-                            "plain_text": match.get("plain_text"),
+                            "plain_text": plain_text,
                         }
                     )
 
                 if not cleaned_matches and ranked_matches:
                     fallback = ranked_matches[0]
-                    cleaned_matches.append(
-                        {
-                            "field": fallback.get("field"),
-                            "field_label": fallback.get("field_label"),
-                            "snippet": fallback.get("snippet"),
-                            "plain_text": fallback.get("plain_text"),
-                        }
-                    )
+                    fallback_text = fallback.get("plain_text", "")
+                    if not query_text or contains_query(fallback_text, terms):
+                        cleaned_matches.append(
+                            {
+                                "field": fallback.get("field"),
+                                "field_label": fallback.get("field_label"),
+                                "snippet": fallback.get("snippet"),
+                                "plain_text": fallback_text,
+                            }
+                        )
+
+                if query_text and not cleaned_matches:
+                    fallback_text = extract_context_snippet(item.get("full_text"), terms)
+                    if contains_query(fallback_text, terms):
+                        cleaned_matches.append(
+                            {
+                                "field": "full_text",
+                                "field_label": "Content",
+                                "snippet": fallback_text,
+                                "plain_text": fallback_text,
+                            }
+                        )
 
                 item["matches"] = cleaned_matches[:3]
+                summary = cleaned_matches[0]["plain_text"] if cleaned_matches else ""
+                if query_text and terms and not contains_query(summary, terms):
+                    query_context = extract_context_snippet(item.get("full_text"), terms)
+                    if contains_query(query_context, terms):
+                        summary = query_context
+
+                item["summary"] = summary
                 results.append(item)
 
             return results
