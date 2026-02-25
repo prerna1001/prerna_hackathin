@@ -22,8 +22,16 @@ class ElasticsearchService:
         """
         self.index_name = 'press_releases'
         self.filter_config_index = 'press_release_filter_config'
-        username = username or os.getenv('ELASTIC_USERNAME', 'elastic')
-        password = password or os.getenv('ELASTIC_PASSWORD', 'w7btNpyMiL6FOvpHzJ7u')
+        host = os.getenv('ELASTIC_HOST', host)
+        port = int(os.getenv('ELASTIC_PORT', str(port)))
+        scheme = os.getenv('ELASTIC_SCHEME', 'https')
+
+        env_username = os.getenv('ELASTIC_USERNAME')
+        env_password = os.getenv('ELASTIC_PASSWORD')
+
+        username = username if username is not None else (env_username if env_username is not None else 'elastic')
+        password = password if password is not None else (env_password if env_password is not None else 'w7btNpyMiL6FOvpHzJ7u')
+        basic_auth = (username, password) if username and password else None
         
         # Create SSL context that trusts the self-signed cert
         ssl_context = ssl.create_default_context()
@@ -32,8 +40,8 @@ class ElasticsearchService:
         
         try:
             self.client = Elasticsearch(
-                hosts=[f'https://{host}:{port}'],
-                basic_auth=(username, password),
+                hosts=[f'{scheme}://{host}:{port}'],
+                basic_auth=basic_auth,
                 verify_certs=False,
                 ssl_show_warn=False,
             )

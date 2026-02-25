@@ -101,9 +101,57 @@ cd frontend
 npm run build
 ```
 
+## Run with Docker (full stack)
+
+This repository includes Docker support for running:
+
+- Elasticsearch
+- FastAPI backend
+- React frontend
+
+### Prerequisites
+
+- Docker Desktop (or Docker Engine + Compose)
+
+### Start everything
+
+From project root:
+
+```bash
+docker compose up --build
+```
+
+Services will be available at:
+
+- Frontend: `http://localhost:3000`
+- Backend API: `http://localhost:8000`
+- Elasticsearch: `http://localhost:9200`
+
+### Stop and clean up
+
+```bash
+docker compose down
+```
+
+To remove volumes too:
+
+```bash
+docker compose down -v
+```
+
+### Docker files added
+
+- `docker-compose.yml`
+- `Dockerfile.backend`
+- `.dockerignore`
+- `requirements.txt`
+- `frontend/Dockerfile`
+- `frontend/.dockerignore`
+
 ## Notes
 
 - Elasticsearch should be running before backend queries are executed.
 - Frontend expects backend on `localhost:8000`.
 - Snapshot HTML files from website crawling are organized under `website_html_sources/`.
+
 
